@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Turn a YouTube link into a clean MP3 for offline listening.">
+  <title>RIFF — YouTube to MP3</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="page-noise" aria-hidden="true"></div>
+  <header class="topbar">
+    <a class="brand" href="#converter" aria-label="Riff home"><span class="brand-mark">≋</span><span>RIFF</span></a>
+    <span class="privacy-pill"><span class="shield">◇</span> Private by design</span>
+  </header>
+
+  <main class="layout">
+    <section class="intro">
+      <div class="eyebrow">✦ Video in. Music out.</div>
+      <h1>Turn a link into a <em>listen.</em></h1>
+      <p>Paste a YouTube link and get a clean MP3, ready for your offline playlist. No clutter, no mystery buttons.</p>
+      <div class="perks"><span>✓ No sign-up</span><span>✓ Up to 320 kbps</span><span>✓ Files stay yours</span></div>
+    </section>
+
+    <section id="converter" class="converter-shell">
+      <div class="converter-card">
+        <div class="card-heading">
+          <div><small>CONVERTER</small><h2 id="panel-title">Drop your link</h2></div>
+          <span class="headphone" id="status-icon">♫</span>
+        </div>
+
+        <form id="converter-form">
+          <label class="field-label" for="youtube-url">↗ YouTube URL</label>
+          <div class="input-wrap">
+            <input id="youtube-url" type="url" placeholder="https://youtube.com/watch?v=..." autocomplete="url" required>
+            <span>♫</span>
+          </div>
+
+          <fieldset id="quality-fieldset">
+            <legend>Audio quality</legend>
+            <div class="quality-group">
+              <button type="button" data-quality="128">128 kbps</button>
+              <button type="button" data-quality="192" class="selected">192 kbps</button>
+              <button type="button" data-quality="320">320 kbps</button>
+            </div>
+          </fieldset>
+
+          <button id="convert-button" class="primary-button" type="submit">Convert to MP3 <span>↓</span></button>
+
+          <div id="progress-box" class="progress-box" hidden>
+            <div class="progress-copy"><strong id="progress-label">Fetching the audio track…</strong><span id="progress-value">0%</span></div>
+            <div class="progress-track"><div id="progress-bar"></div></div>
+          </div>
+
+          <p id="message" class="message" aria-live="polite">Only convert content you own or have permission to download.</p>
+        </form>
+
+        <div id="result" class="result" hidden>
+          <div class="track-card">
+            <img id="thumbnail" alt="" hidden>
+            <div class="track-placeholder" id="track-placeholder">♫</div>
+            <div class="track-copy"><strong id="track-title"></strong><span id="track-meta"></span></div>
+          </div>
+          <a id="download-button" class="primary-button" download>Download MP3 <span>↓</span></a>
+          <button id="reset-button" class="reset-button" type="button">↻ Convert another link</button>
+        </div>
+      </div>
+      <div class="steps"><span>↗ Paste</span><span>◷ Convert</span><span>↓ Save</span></div>
+    </section>
+  </main>
+
+  <footer>RIFF is not affiliated with YouTube. Please respect creators and platform terms.</footer>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
