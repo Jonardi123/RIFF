@@ -5,7 +5,7 @@ RIFF is a private, local YouTube-to-MP3 converter for Windows. It streams an aud
 ## Run from source
 
 1. Install [Node.js 22 or newer](https://nodejs.org/).
-2. Double-click `Setup RIFF.cmd` to download and verify the pinned `yt-dlp` runtime.
+2. Double-click `Setup RIFF.cmd` to download and verify the pinned `yt-dlp` and FFmpeg runtimes.
 3. Double-click `Start RIFF.cmd`.
 4. Paste a YouTube URL, choose a bitrate, and download the MP3.
 
@@ -13,7 +13,7 @@ The server listens only on `127.0.0.1:3210`. It does not store submitted links o
 
 ## Portable build
 
-The downloadable Windows ZIP also bundles Node.js and `yt-dlp`, so it does not require an install. Those runtime binaries are intentionally excluded from Git.
+The downloadable Windows ZIP bundles Node.js, `yt-dlp`, and the FFmpeg WebAssembly core, so it does not require an install and the first conversion starts faster. Those runtime files are intentionally excluded from Git.
 
 ## Legal
 

@@ -21,6 +21,15 @@ if errorlevel 1 (
   exit /b 1
 )
 
+echo Downloading the local audio engine...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $base='https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/esm'; $files=@(@{Name='ffmpeg-core.js'; Hash='67A48F11645F85439F3FDE4F2119042C16B374B910206B7A7A24F342E28DCAE3'}, @{Name='ffmpeg-core.wasm'; Hash='9F57947A5BD530D8F00C5B3F2CB2A3492FAA7E5D823315342D6A8656D0A6B7B7'}); foreach ($file in $files) { $dest=Join-Path $PWD ('runtime\' + $file.Name); Invoke-WebRequest -Uri ($base + '/' + $file.Name) -OutFile $dest; $actual=(Get-FileHash -Algorithm SHA256 -LiteralPath $dest).Hash; if ($actual -ne $file.Hash) { Remove-Item -LiteralPath $dest -Force; throw ($file.Name + ' checksum verification failed.') } }"
+if errorlevel 1 (
+  echo.
+  echo Audio engine setup failed. Check your internet connection and try again.
+  pause
+  exit /b 1
+)
+
 echo.
 echo RIFF is ready. Double-click Start RIFF.cmd.
 pause

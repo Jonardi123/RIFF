@@ -4,6 +4,6 @@ Node.js 24.19.0 — https://nodejs.org/ — MIT license and bundled third-party 
 yt-dlp 2026.08.19 — https://github.com/yt-dlp/yt-dlp — Unlicense, plus bundled third-party licenses
 ffmpeg.wasm 0.12.15 — https://github.com/ffmpegwasm/ffmpeg.wasm — MIT license
 @ffmpeg/util 0.12.2 — https://github.com/ffmpegwasm/ffmpeg.wasm — MIT license
-FFmpeg core for WebAssembly 0.12.10 is loaded from jsDelivr when a conversion starts. FFmpeg is licensed under the LGPL/GPL depending on its build configuration: https://ffmpeg.org/legal.html
+FFmpeg core for WebAssembly 0.12.10 is bundled in the portable build or downloaded during source setup. FFmpeg is licensed under the LGPL/GPL depending on its build configuration: https://ffmpeg.org/legal.html
 
 YouTube and its marks belong to their respective owner. RIFF is not affiliated with or endorsed by YouTube.

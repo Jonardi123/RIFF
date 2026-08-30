@@ -20,6 +20,7 @@ const qualityButtons = [...document.querySelectorAll('[data-quality]')];
 
 let quality = '192';
 let ffmpeg;
+let ffmpegPromise;
 let ffmpegProgressReady = false;
 let currentDownloadUrl;
 
@@ -56,7 +57,7 @@ function showError(text) {
 }
 
 async function readAudio(response) {
-  const total = Number(response.headers.get('content-length') || 0);
+  const total = Number(response.headers.get('content-length') || response.headers.get('x-riff-size') || 0);
   const reader = response.body?.getReader();
   if (!reader) return new Uint8Array(await response.arrayBuffer());
   const chunks = [];
@@ -76,21 +77,37 @@ async function readAudio(response) {
 
 async function getFfmpeg() {
   if (ffmpeg?.loaded) return ffmpeg;
-  const [{ FFmpeg }, { toBlobURL }] = await Promise.all([
-    import('/vendor/ffmpeg/index.js'),
-    import('/vendor/util/index.js'),
-  ]);
-  ffmpeg ||= new FFmpeg();
-  if (!ffmpegProgressReady) {
-    ffmpeg.on('progress', ({ progress }) => setProgress(44 + progress * 52));
-    ffmpegProgressReady = true;
+  if (!ffmpegPromise) {
+    ffmpegPromise = (async () => {
+      const { FFmpeg } = await import('/vendor/ffmpeg/index.js');
+      ffmpeg ||= new FFmpeg();
+      if (!ffmpegProgressReady) {
+        ffmpeg.on('progress', ({ progress }) => setProgress(44 + progress * 52));
+        ffmpegProgressReady = true;
+      }
+      await ffmpeg.load({
+        coreURL: '/runtime/ffmpeg-core.js',
+        wasmURL: '/runtime/ffmpeg-core.wasm',
+      });
+      return ffmpeg;
+    })().catch((error) => {
+      ffmpegPromise = undefined;
+      throw error;
+    });
   }
-  const coreBase = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/esm';
-  await ffmpeg.load({
-    coreURL: await toBlobURL(`${coreBase}/ffmpeg-core.js`, 'text/javascript'),
-    wasmURL: await toBlobURL(`${coreBase}/ffmpeg-core.wasm`, 'application/wasm'),
-  });
-  return ffmpeg;
+  return ffmpegPromise;
+}
+
+function warmConverter() {
+  void getFfmpeg().catch(() => {});
+}
+
+input.addEventListener('focus', warmConverter, { once: true });
+input.addEventListener('paste', warmConverter, { once: true });
+if ('requestIdleCallback' in window) {
+  window.requestIdleCallback(warmConverter, { timeout: 1200 });
+} else {
+  setTimeout(warmConverter, 350);
 }
 
 form.addEventListener('submit', async (event) => {
@@ -108,6 +125,7 @@ form.addEventListener('submit', async (event) => {
   setProgress(7, 'Fetching the audio track…');
 
   try {
+    const converterPromise = getFfmpeg();
     const response = await fetch(`/api/audio?url=${encodeURIComponent(sourceUrl)}`);
     if (!response.ok) {
       const payload = await response.json().catch(() => null);
@@ -121,7 +139,7 @@ form.addEventListener('submit', async (event) => {
     const audio = await readAudio(response);
 
     setProgress(38, 'Warming up the converter…');
-    const converter = await getFfmpeg();
+    const converter = await converterPromise;
     setProgress(44, 'Polishing your MP3…');
     const inputName = `input.${extension}`;
     const outputName = 'output.mp3';

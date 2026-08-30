@@ -1,16 +1,17 @@
 import { createReadStream, existsSync } from 'node:fs';
-import { stat } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import http from 'node:http';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
-import { Readable } from 'node:stream';
 
 const appDir = path.dirname(fileURLToPath(import.meta.url));
 const bundledNodePath = path.join(appDir, 'runtime', 'node.exe');
 const nodePath = existsSync(bundledNodePath) ? bundledNodePath : process.execPath;
 const ytdlpPath = path.join(appDir, 'runtime', 'yt-dlp.exe');
-const port = 3210;
+const configuredPort = Number.parseInt(process.env.RIFF_PORT || '3210', 10);
+const port = Number.isInteger(configuredPort) && configuredPort > 0 && configuredPort < 65536 ? configuredPort : 3210;
 let activeConversion = false;
 
 const staticFiles = new Map([
@@ -29,6 +30,8 @@ const staticFiles = new Map([
   ['/vendor/util/const.js', ['vendor/util/const.js', 'text/javascript; charset=utf-8']],
   ['/vendor/util/errors.js', ['vendor/util/errors.js', 'text/javascript; charset=utf-8']],
   ['/vendor/util/types.js', ['vendor/util/types.js', 'text/javascript; charset=utf-8']],
+  ['/runtime/ffmpeg-core.js', ['runtime/ffmpeg-core.js', 'text/javascript; charset=utf-8']],
+  ['/runtime/ffmpeg-core.wasm', ['runtime/ffmpeg-core.wasm', 'application/wasm']],
 ]);
 
 function json(response, statusCode, payload) {
@@ -51,46 +54,27 @@ function getYouTubeId(value) {
   return null;
 }
 
-function runYtDlp(args, timeoutMs = 90000) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(ytdlpPath, args, {
-      cwd: appDir,
-      windowsHide: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    const output = [];
-    const errors = [];
-    let outputBytes = 0;
+function ytDlpError(errors) {
+  const detail = Buffer.concat(errors).toString('utf8').split(/\r?\n/).filter(Boolean).at(-1);
+  return new Error(detail?.replace(/^ERROR:\s*/i, '') || 'YouTube could not prepare this video.');
+}
 
-    const timer = setTimeout(() => {
-      child.kill();
-      reject(new Error('YouTube took too long to respond. Please try again.'));
-    }, timeoutMs);
-
-    child.stdout.on('data', (chunk) => {
-      outputBytes += chunk.length;
-      if (outputBytes > 12 * 1024 * 1024) {
-        child.kill();
-        reject(new Error('The video details were unexpectedly large.'));
-        return;
-      }
-      output.push(chunk);
-    });
-    child.stderr.on('data', (chunk) => errors.push(chunk));
-    child.on('error', (error) => {
-      clearTimeout(timer);
-      reject(error);
-    });
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      if (code === 0) {
-        resolve(Buffer.concat(output).toString('utf8'));
-      } else {
-        const detail = Buffer.concat(errors).toString('utf8').split(/\r?\n/).filter(Boolean).at(-1);
-        reject(new Error(detail?.replace(/^ERROR:\s*/i, '') || 'YouTube could not prepare this video.'));
-      }
-    });
-  });
+async function waitForMetadata(filePath, child, errors, getSpawnError, timeoutMs = 45000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      const metadata = (await readFile(filePath, 'utf8')).trim();
+      if (metadata) return metadata;
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+    }
+    const spawnError = getSpawnError();
+    if (spawnError) throw spawnError;
+    if (child.exitCode !== null) throw ytDlpError(errors);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  child.kill();
+  throw new Error('YouTube took too long to respond. Please try again.');
 }
 
 async function handleAudio(requestUrl, request, response) {
@@ -110,49 +94,62 @@ async function handleAudio(requestUrl, request, response) {
   }
 
   activeConversion = true;
+  let child;
+  let tempDirectory;
   try {
-    const formatSelector = 'bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio';
-    const metadataText = await runYtDlp([
+    tempDirectory = await mkdtemp(path.join(tmpdir(), 'riff-'));
+    const metadataPath = path.join(tempDirectory, 'audio.json');
+    const errors = [];
+    let errorBytes = 0;
+    let spawnError;
+    child = spawn(ytdlpPath, [
       '--no-playlist',
+      '--quiet',
       '--no-warnings',
       '--no-progress',
       '--js-runtimes', `node:${nodePath}`,
       '--remote-components', 'ejs:github',
-      '--format', formatSelector,
-      '--dump-single-json',
-      '--skip-download',
+      '--format', '140/bestaudio[ext=m4a]/bestaudio',
+      '--print-to-file', 'before_dl:%(.{id,title,duration,thumbnail,is_live,live_status,ext,acodec,filesize,filesize_approx})j', metadataPath,
+      '--output', '-',
       sourceUrl,
-    ]);
+    ], {
+      cwd: appDir,
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    child.on('error', (error) => { spawnError = error; });
+    child.stderr.on('data', (chunk) => {
+      if (errorBytes >= 1024 * 1024) return;
+      errors.push(chunk);
+      errorBytes += chunk.length;
+    });
+    child.stdout.pause();
+
+    const metadataText = await waitForMetadata(metadataPath, child, errors, () => spawnError);
     const metadata = JSON.parse(metadataText);
-    const selected = metadata.requested_downloads?.[0] || metadata;
 
     if (metadata.is_live || metadata.live_status === 'is_upcoming') {
+      child.kill();
       activeConversion = false;
+      void rm(tempDirectory, { recursive: true, force: true });
       return json(response, 422, { error: 'Live and upcoming videos are not supported yet.' });
     }
     if (!metadata.duration) {
+      child.kill();
       activeConversion = false;
+      void rm(tempDirectory, { recursive: true, force: true });
       return json(response, 422, { error: 'The video duration could not be read.' });
     }
     if (metadata.duration > 30 * 60) {
+      child.kill();
       activeConversion = false;
+      void rm(tempDirectory, { recursive: true, force: true });
       return json(response, 422, { error: 'Choose a video under 30 minutes for browser conversion.' });
     }
-    if (!selected.url) {
-      activeConversion = false;
-      return json(response, 422, { error: 'YouTube did not provide an audio track for this video.' });
-    }
 
-    const sourceResponse = await fetch(selected.url, {
-      redirect: 'follow',
-      headers: selected.http_headers || metadata.http_headers || {},
-    });
-    if (!sourceResponse.ok || !sourceResponse.body) {
-      throw new Error('The audio stream could not be opened. Try again in a moment.');
-    }
-
-    const contentType = sourceResponse.headers.get('content-type') || selected.mime_type || 'audio/mp4';
-    const contentLength = sourceResponse.headers.get('content-length') || selected.filesize || selected.filesize_approx;
+    const contentTypes = { m4a: 'audio/mp4', mp4: 'audio/mp4', webm: 'audio/webm', ogg: 'audio/ogg', opus: 'audio/ogg' };
+    const contentType = contentTypes[metadata.ext] || 'application/octet-stream';
     const title = encodeURIComponent(metadata.title || 'Riff audio');
     const thumbnail = metadata.thumbnail ? encodeURIComponent(metadata.thumbnail) : '';
     const headers = {
@@ -162,19 +159,39 @@ async function handleAudio(requestUrl, request, response) {
       'x-riff-title': title,
       'x-riff-duration': String(metadata.duration),
     };
-    if (contentLength) headers['content-length'] = String(contentLength);
+    if (metadata.filesize || metadata.filesize_approx) headers['x-riff-size'] = String(metadata.filesize || metadata.filesize_approx);
+    if (metadata.filesize) headers['content-length'] = String(metadata.filesize);
     if (thumbnail) headers['x-riff-thumbnail'] = thumbnail;
     response.writeHead(200, headers);
 
-    const stream = Readable.fromWeb(sourceResponse.body);
-    const finish = () => { activeConversion = false; };
-    stream.on('error', (error) => response.destroy(error));
-    response.on('close', finish);
+    let finished = false;
+    const downloadTimer = setTimeout(() => {
+      if (child.exitCode === null) child.kill();
+      response.destroy(new Error('The audio download took too long. Please try again.'));
+    }, 180000);
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(downloadTimer);
+      activeConversion = false;
+      if (tempDirectory) void rm(tempDirectory, { recursive: true, force: true });
+    };
+    child.stdout.on('error', (error) => response.destroy(error));
+    child.on('close', (code) => {
+      if (code !== 0 && !response.writableEnded) response.destroy(ytDlpError(errors));
+      finish();
+    });
+    response.on('close', () => {
+      if (!finished && child.exitCode === null) child.kill();
+      finish();
+    });
     response.on('finish', finish);
-    stream.pipe(response);
+    child.stdout.pipe(response);
     return;
   } catch (error) {
+    if (child && child.exitCode === null) child.kill();
     activeConversion = false;
+    if (tempDirectory) void rm(tempDirectory, { recursive: true, force: true });
     if (!response.headersSent) {
       return json(response, 502, { error: error instanceof Error ? error.message : 'YouTube could not prepare this video.' });
     }

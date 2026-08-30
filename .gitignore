@@ -1,4 +1,6 @@
 runtime/*.exe
+runtime/ffmpeg-core.js
+runtime/ffmpeg-core.wasm
 *.zip
 .DS_Store
 Thumbs.db
