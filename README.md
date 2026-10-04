@@ -11,6 +11,8 @@ RIFF is a private, local YouTube-to-MP3 converter for Windows. It streams an aud
 
 The server listens only on `127.0.0.1:3210`. It does not store submitted links or audio. Videos are limited to 30 minutes to keep browser memory use reasonable.
 
+Run the local HTTP regression tests with `node --test server.test.mjs`. These checks do not download media or require the Windows runtimes.
+
 ## Portable build
 
 The downloadable Windows ZIP bundles Node.js, `yt-dlp`, and the FFmpeg WebAssembly core, so it does not require an install and the first conversion starts faster. Those runtime files are intentionally excluded from Git.
