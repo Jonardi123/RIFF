@@ -211,55 +211,78 @@ async function serveStatic(requestUrl, response) {
       'content-length': String(details.size),
       'cache-control': relativePath === 'index.html' ? 'no-cache' : 'public, max-age=3600',
     });
-    createReadStream(filePath).pipe(response);
+    createReadStream(filePath).on('error', (error) => response.destroy(error)).pipe(response);
   } catch {
     json(response, 404, { error: 'App file missing' });
   }
 }
 
-if (!existsSync(ytdlpPath)) {
-  console.error('RIFF is missing runtime\\yt-dlp.exe. Run Setup RIFF.cmd and try again.');
-  process.exit(1);
+export function createRiffServer() {
+  return http.createServer(async (request, response) => {
+    const localPort = request.socket.localPort;
+    const hosts = [`127.0.0.1:${localPort}`, `localhost:${localPort}`];
+    const host = (request.headers.host || '').toLowerCase();
+    const origin = request.headers.origin?.toLowerCase();
+    const fetchSite = request.headers['sec-fetch-site'];
+    if (!hosts.includes(host)
+        || (origin && !hosts.some((value) => origin === `http://${value}`))
+        || (fetchSite && !['same-origin', 'none'].includes(fetchSite))) {
+      return json(response, 403, { error: 'Open RIFF from its local address.' });
+    }
+    let requestUrl;
+    try {
+      requestUrl = new URL(request.url || '/', `http://127.0.0.1:${localPort}`);
+    } catch {
+      return json(response, 400, { error: 'Invalid request URL' });
+    }
+    if (request.method === 'GET' && requestUrl.pathname === '/api/audio') {
+      await handleAudio(requestUrl, request, response);
+      return;
+    }
+    if (request.method === 'GET') {
+      await serveStatic(requestUrl, response);
+      return;
+    }
+    json(response, 405, { error: 'Method not allowed' });
+  });
 }
 
-const server = http.createServer(async (request, response) => {
-  const requestUrl = new URL(request.url || '/', `http://${request.headers.host || `127.0.0.1:${port}`}`);
-  if (request.method === 'GET' && requestUrl.pathname === '/api/audio') {
-    await handleAudio(requestUrl, request, response);
-    return;
+function startRiff() {
+  if (!existsSync(ytdlpPath)) {
+    console.error('RIFF is missing runtime\\yt-dlp.exe. Run Setup RIFF.cmd and try again.');
+    process.exit(1);
   }
-  if (request.method === 'GET') {
-    await serveStatic(requestUrl, response);
-    return;
-  }
-  json(response, 405, { error: 'Method not allowed' });
-});
-
-server.listen(port, '127.0.0.1', () => {
-  const url = `http://127.0.0.1:${port}`;
-  console.log('');
-  console.log('  RIFF is running at ' + url);
-  console.log('  Keep this window open while you convert. Press Ctrl+C to stop.');
-  console.log('');
-  if (process.env.RIFF_NO_OPEN !== '1') {
-    const opener = spawn('cmd.exe', ['/c', 'start', '', url], {
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: true,
-    });
-    opener.unref();
-  }
-});
-
-server.on('error', (error) => {
-  if (error.code === 'EADDRINUSE') {
+  const server = createRiffServer();
+  server.listen(port, '127.0.0.1', () => {
     const url = `http://127.0.0.1:${port}`;
-    console.log('RIFF is already running. Opening it now…');
-    const opener = spawn('cmd.exe', ['/c', 'start', '', url], { detached: true, stdio: 'ignore', windowsHide: true });
-    opener.unref();
-    setTimeout(() => process.exit(0), 500);
-    return;
-  }
-  console.error(error);
-  process.exit(1);
-});
+    console.log('');
+    console.log('  RIFF is running at ' + url);
+    console.log('  Keep this window open while you convert. Press Ctrl+C to stop.');
+    console.log('');
+    if (process.env.RIFF_NO_OPEN !== '1') {
+      const opener = spawn('cmd.exe', ['/c', 'start', '', url], {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true,
+      });
+      opener.unref();
+    }
+  });
+
+  server.on('error', (error) => {
+    if (error.code === 'EADDRINUSE') {
+      const url = `http://127.0.0.1:${port}`;
+      console.log('RIFF is already running. Opening it now…');
+      const opener = spawn('cmd.exe', ['/c', 'start', '', url], { detached: true, stdio: 'ignore', windowsHide: true });
+      opener.unref();
+      setTimeout(() => process.exit(0), 500);
+      return;
+    }
+    console.error(error);
+    process.exit(1);
+  });
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  startRiff();
+}
